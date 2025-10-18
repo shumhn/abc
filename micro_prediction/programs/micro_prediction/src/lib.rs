@@ -159,10 +159,8 @@ pub mod micro_prediction {
     }
 
     pub fn close_round(ctx: Context<CloseRound>, _final_price: Option<u64>) -> Result<()> {
-    pub fn close_round(ctx: Context<CloseRound>, _final_price: Option<u64>) -> Result<()> {
         let global_state = &ctx.accounts.global_state;
         require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
-
         let clock = Clock::get()?;
         let round_state = &mut ctx.accounts.round_state;
         require!(
@@ -550,30 +548,6 @@ pub mod micro_prediction {
     }
 }
 
-fn load_and_validate_price(price_feed_info: &AccountInfo, clock: &Clock) -> Result<u64> {
-    let price_feed = load_price_feed_from_account_info(price_feed_info)
-        .map_err(|_| error!(ErrorCode::PythPriceNotAvailable))?;
-    let price = price_feed
-        .get_price_no_older_than(clock.unix_timestamp, PYTH_PRICE_STALENESS_THRESHOLD_SECS)
-        .map_err(|_| error!(ErrorCode::PythPriceStale))?;
-    let decimal_exponent = price
-        .expo
-        .checked_neg()
-        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
-    let scale = 10u128
-        .checked_pow(decimal_exponent as u32)
-        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
-    let price_scaled = (price.price as i128)
-        .checked_abs()
-        .ok_or(error!(ErrorCode::PythPriceScalingError))? as u128;
-    let display_price = price_scaled
-        .checked_div(scale)
-        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
-    display_price
-        .try_into()
-        .map_err(|_| error!(ErrorCode::PythPriceScalingError))
-}
-
 #[derive(Accounts)]
 pub struct Initialize<'info> {
     #[account(mut)]
@@ -665,6 +639,30 @@ pub struct PlacePrediction<'info> {
     #[account(seeds = [VAULT_AUTHORITY_SEED], bump = global_state.vault_authority_bump)]
     pub vault_authority: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
+}
+
+fn load_and_validate_price(price_feed_info: &AccountInfo, clock: &Clock) -> Result<u64> {
+    let price_feed = load_price_feed_from_account_info(price_feed_info)
+        .map_err(|_| error!(ErrorCode::PythPriceNotAvailable))?;
+    let price = price_feed
+        .get_price_no_older_than(clock.unix_timestamp, PYTH_PRICE_STALENESS_THRESHOLD_SECS)
+        .map_err(|_| error!(ErrorCode::PythPriceStale))?;
+    let decimal_exponent = price
+        .expo
+        .checked_neg()
+        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
+    let scale = 10u128
+        .checked_pow(decimal_exponent as u32)
+        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
+    let price_scaled = (price.price as i128)
+        .checked_abs()
+        .ok_or(error!(ErrorCode::PythPriceScalingError))? as u128;
+    let display_price = price_scaled
+        .checked_div(scale)
+        .ok_or(error!(ErrorCode::PythPriceScalingError))?;
+    display_price
+        .try_into()
+        .map_err(|_| error!(ErrorCode::PythPriceScalingError))
 }
 
 #[derive(Accounts)]
