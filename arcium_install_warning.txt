@@ -1,0 +1,1 @@
+arcup install failed because Docker is not available. Install Docker Desktop, ensure it is running, then rerun `arcup install`.

@@ -1,0 +1,1 @@
+MagicBlock install script could not be retrieved (DNS resolution for get.magicblock.gg failed). Manual setup will proceed using SDK dependencies directly within the project.

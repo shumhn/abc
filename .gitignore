@@ -1,0 +1,24 @@
+# Build artifacts
+*.tar.gz
+*.tar.xz
+*.bz2
+*.xz
+
+# Local toolchain directories
+openssl-3.3.1/
+openssl-3/
+solana-release/
+pkg-config-0.29.2/
+local/
+solana.tar.bz2
+pkg-config.tar.gz
+openssl.tar.gz
+solana-release.tar.xz
+openssl-3.3.1.tar.xz
+
+# Project build outputs
+micro_prediction/target/
+micro_prediction/node_modules/
+
+# Misc
+.DS_Store
