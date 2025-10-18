@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pyth BTC Price Stream</title>
+    <title>Pyth Crypto Trio Prices</title>
     <style>
       * {
         box-sizing: border-box;
@@ -18,13 +18,16 @@
         color: #f8fafc;
       }
       .card {
-        width: min(420px, 90vw);
-        padding: 2.5rem 2rem;
+        width: min(520px, 92vw);
+        padding: 2.6rem 2.2rem;
         border-radius: 18px;
-        background: rgba(15, 23, 42, 0.85);
-        box-shadow: 0 10px 40px rgba(15, 23, 42, 0.6);
-        backdrop-filter: blur(16px);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: rgba(15, 23, 42, 0.88);
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.65);
+        backdrop-filter: blur(18px);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        display: flex;
+        flex-direction: column;
+        gap: 1.75rem;
       }
       h1 {
         margin: 0;
@@ -33,28 +36,58 @@
         color: #38bdf8;
         letter-spacing: 0.04em;
       }
-      .price {
-        margin-top: 1.75rem;
-        font-size: clamp(2.4rem, 5vw, 3.2rem);
-        text-align: center;
-        font-weight: 700;
+      .feeds {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
       }
-      .confidence {
-        margin-top: 0.25rem;
-        text-align: center;
-        font-size: 1.05rem;
+      .feed {
+        padding: 1.2rem 1.1rem 1.1rem;
+        border-radius: 16px;
+        border: 1px solid rgba(100, 116, 139, 0.35);
+        background: rgba(15, 23, 42, 0.72);
+        display: grid;
+        gap: 0.65rem;
+        transition: transform 0.15s ease, border-color 0.2s ease;
+      }
+      .feed:hover {
+        transform: translateY(-2px);
+        border-color: rgba(56, 189, 248, 0.55);
+      }
+      .feed__label {
+        font-size: 0.9rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
         color: #94a3b8;
       }
-      .meta {
-        margin-top: 1.5rem;
+      .feed__price {
+        font-size: clamp(2.1rem, 5vw, 2.8rem);
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      .feed__meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
         font-size: 0.95rem;
         color: #cbd5f5;
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
+      }
+      .feed__meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .feed__meta span::before {
+        content: "•";
+        color: rgba(148, 163, 184, 0.5);
+      }
+      .feed__meta span:first-child::before {
+        content: "";
       }
       .status {
-        margin-top: 1.75rem;
         padding: 0.75rem 1rem;
         border-radius: 12px;
         background: rgba(56, 189, 248, 0.1);
@@ -89,92 +122,291 @@
   </head>
   <body>
     <div class="card">
-      <h1>BTC / USD (Pyth)</h1>
-      <div id="price" class="price">--</div>
-      <div id="confidence" class="confidence">± --</div>
-      <div class="meta">
-        <span id="publish-time">Updated: --</span>
-        <span id="status">Status: --</span>
-      </div>
+      <h1>Pyth BTC / SOL / ETH</h1>
+      <ul class="feeds">
+        <li class="feed" data-symbol="BTC">
+          <span class="feed__label">BTC / USD</span>
+          <span class="feed__price" id="price-btc">--</span>
+          <div class="feed__meta">
+            <span id="conf-btc">± --</span>
+            <span id="time-btc">Updated: --</span>
+          </div>
+        </li>
+        <li class="feed" data-symbol="SOL">
+          <span class="feed__label">SOL / USD</span>
+          <span class="feed__price" id="price-sol">--</span>
+          <div class="feed__meta">
+            <span id="conf-sol">± --</span>
+            <span id="time-sol">Updated: --</span>
+          </div>
+        </li>
+        <li class="feed" data-symbol="ETH">
+          <span class="feed__label">ETH / USD</span>
+          <span class="feed__price" id="price-eth">--</span>
+          <div class="feed__meta">
+            <span id="conf-eth">± --</span>
+            <span id="time-eth">Updated: --</span>
+          </div>
+        </li>
+      </ul>
       <div id="connection-status" class="status">Connecting to Pyth Hermes…</div>
       <button id="refresh">Refresh Now</button>
     </div>
 
     <script>
-      const HERMES_ENDPOINT =
-        "https://hermes.pyth.network/api/latest_price_feeds";
-      const FEED_ID =
-        "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43";
-      const POLL_INTERVAL_MS = 1500;
+      const HERMES_WS_ENDPOINT = "wss://hermes.pyth.network/ws";
+      const FEEDS = [
+        {
+          key: "btc",
+          id: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+          subscribeId: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+          label: "BTC / USD",
+          decimals: 2
+        },
+        {
+          key: "sol",
+          id: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+          subscribeId: "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+          label: "SOL / USD",
+          decimals: 4
+        },
+        {
+          key: "eth",
+          id: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+          subscribeId: "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+          label: "ETH / USD",
+          decimals: 2
+        }
+      ];
 
-      const priceEl = document.getElementById("price");
-      const confidenceEl = document.getElementById("confidence");
-      const publishTimeEl = document.getElementById("publish-time");
-      const statusEl = document.getElementById("status");
+      const feedElements = FEEDS.reduce((acc, feed) => {
+        acc[feed.key] = {
+          price: document.getElementById(`price-${feed.key}`),
+          confidence: document.getElementById(`conf-${feed.key}`),
+          time: document.getElementById(`time-${feed.key}`)
+        };
+        return acc;
+      }, {});
       const connectionEl = document.getElementById("connection-status");
       const refreshBtn = document.getElementById("refresh");
 
-      let pollTimer = null;
+      let socket = null;
+      let reconnectTimer = null;
+      let heartbeatTimer = null;
+      let reconnectAttempts = 0;
 
-      function formatPrice(raw, expo) {
+      function formatPrice(raw, expo, decimals) {
         const scaled = Number(raw) * 10 ** expo;
+        const resolvedDecimals = Number.isInteger(decimals) ? decimals : scaled < 1 ? 4 : 2;
         return scaled.toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
+          minimumFractionDigits: resolvedDecimals,
+          maximumFractionDigits: resolvedDecimals,
         });
-      }
-
-      async function fetchPrice() {
-        try {
-          const url = new URL(HERMES_ENDPOINT);
-          url.searchParams.append("ids[]", FEED_ID);
-
-          const response = await fetch(url.toString());
-          if (!response.ok) {
-            throw new Error(`Hermes HTTP ${response.status}`);
-          }
-
-          const payload = await response.json();
-          if (!payload.length || !payload[0].price) {
-            throw new Error("No price data in Hermes response");
-          }
-
-          const { price, conf, expo, publish_time } = payload[0].price;
-          priceEl.textContent = `$${formatPrice(price, expo)}`;
-          confidenceEl.textContent = `± ${formatPrice(conf, expo)}`;
-          publishTimeEl.textContent = `Updated: ${new Date(
-            publish_time * 1000
-          ).toLocaleTimeString()}`;
-          statusEl.textContent = "Status: LIVE";
-          connectionEl.textContent = "Streaming from Pyth Hermes";
-          connectionEl.style.background = "rgba(74, 222, 128, 0.1)";
-          connectionEl.style.color = "#4ade80";
-        } catch (err) {
-          console.error("Hermes fetch failed", err);
-          connectionEl.textContent = "Unable to reach Pyth Hermes";
-          connectionEl.style.background = "rgba(248, 113, 113, 0.12)";
-          connectionEl.style.color = "#f87171";
-          statusEl.textContent = "Status: ERROR";
-        }
-      }
-
-      function startPolling() {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = setInterval(fetchPrice, POLL_INTERVAL_MS);
       }
 
       refreshBtn.addEventListener("click", () => {
         refreshBtn.disabled = true;
-        fetchPrice().finally(() => {
-          setTimeout(() => {
-            refreshBtn.disabled = false;
-          }, 750);
+        updateConnectionStatus("Refreshing subscription…", "rgba(56, 189, 248, 0.1)", "#38bdf8");
+        startWebSocket();
+        setTimeout(() => {
+          refreshBtn.disabled = false;
+        }, 750);
+      });
+
+      function updateFeedRow(feed, latest) {
+        const elements = feedElements[feed.key];
+        if (!elements) return;
+
+        if (!latest || latest.price === undefined || latest.expo === undefined) {
+          elements.price.textContent = "--";
+          elements.confidence.textContent = "± --";
+          elements.time.textContent = "Updated: --";
+          return;
+        }
+
+        elements.price.textContent = `$${formatPrice(latest.price, latest.expo, feed.decimals)}`;
+
+        if (latest.conf !== undefined && latest.expo !== undefined) {
+          elements.confidence.textContent = `± ${formatPrice(latest.conf, latest.expo, feed.decimals + 2)}`;
+        } else {
+          elements.confidence.textContent = "± --";
+        }
+
+        if (latest.publish_time) {
+          elements.time.textContent = `Updated: ${new Date(latest.publish_time * 1000).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          })}`;
+        } else {
+          elements.time.textContent = "Updated: --";
+        }
+      }
+
+      function startWebSocket() {
+        clearReconnectTimer();
+        cleanupSocket();
+
+        updateConnectionStatus("Connecting to Pyth Hermes…", "rgba(56, 189, 248, 0.1)", "#38bdf8");
+
+        try {
+          socket = new WebSocket(HERMES_WS_ENDPOINT);
+        } catch (err) {
+          console.error("Failed to construct Hermes WebSocket", err);
+          scheduleReconnect();
+          return;
+        }
+
+        socket.addEventListener("open", handleSocketOpen);
+        socket.addEventListener("message", handleSocketMessage);
+        socket.addEventListener("error", handleSocketError);
+        socket.addEventListener("close", handleSocketClose);
+      }
+
+      function handleSocketOpen() {
+        reconnectAttempts = 0;
+        sendMessage({
+          type: "subscribe_price_updates",
+          ids: FEEDS.map((feed) => feed.subscribeId || feed.id),
         });
+        updateConnectionStatus("Streaming from Pyth Hermes", "rgba(74, 222, 128, 0.12)", "#4ade80");
+        primeHeartbeat();
+      }
+
+      function handleSocketMessage(event) {
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (err) {
+          console.error("Failed to parse Hermes message", err, event.data);
+          return;
+        }
+
+        if (!payload) return;
+
+        if (payload.type === "connected" || payload.type === "pong") {
+          primeHeartbeat();
+          return;
+        }
+
+        if (payload.type === "error") {
+          console.error("Hermes error", payload);
+          updateConnectionStatus(`Hermes error: ${payload.message || "unknown"}`, "rgba(248, 113, 113, 0.12)", "#f87171");
+          return;
+        }
+
+        if (payload.type === "price_updates" && Array.isArray(payload.updates)) {
+          primeHeartbeat();
+          payload.updates.forEach((update) => applyPriceUpdate(update));
+          return;
+        }
+
+        if (payload.type === "price_update") {
+          primeHeartbeat();
+          applyPriceUpdate(payload);
+        }
+      }
+
+      function applyPriceUpdate(update) {
+        if (!update) return;
+        const feedId = update.id || update.price_id || update.price?.id;
+        const pricePayload = update.price || update.price_message || update.price_message?.price;
+        if (!feedId || !pricePayload) return;
+
+        const feed = FEEDS.find((entry) => entry.id === feedId || entry.subscribeId === feedId);
+        if (!feed) return;
+
+        const publishTime = pricePayload.publish_time ?? pricePayload.publishTime;
+        const conf = pricePayload.conf ?? pricePayload.confidence;
+        const expo = pricePayload.expo ?? pricePayload.exponent;
+        const value = pricePayload.price ?? pricePayload.value;
+
+        updateFeedRow(feed, {
+          price: value,
+          conf,
+          expo,
+          publish_time: publishTime,
+        });
+      }
+
+      function handleSocketError(err) {
+        console.error("Hermes WebSocket error", err);
+        updateConnectionStatus("Hermes WebSocket error", "rgba(248, 113, 113, 0.12)", "#f87171");
+      }
+
+      function handleSocketClose(event) {
+        cleanupSocket();
+        updateConnectionStatus("Disconnected – retrying…", "rgba(248, 113, 113, 0.12)", "#f87171");
+        scheduleReconnect(event);
+      }
+
+      function sendMessage(message) {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        try {
+          socket.send(JSON.stringify(message));
+        } catch (err) {
+          console.error("Failed to send Hermes message", err);
+        }
+      }
+
+      function updateConnectionStatus(text, background, color) {
+        connectionEl.textContent = text;
+        if (background) connectionEl.style.background = background;
+        if (color) connectionEl.style.color = color;
+      }
+
+      function scheduleReconnect(event) {
+        if (reconnectTimer) return;
+        const backoff = Math.min(1000 * 2 ** reconnectAttempts, 20_000);
+        const jitter = Math.random() * 500;
+        reconnectAttempts += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          startWebSocket();
+        }, backoff + jitter);
+        console.info(`Reconnecting to Hermes in ${Math.round(backoff + jitter)}ms`, event);
+      }
+
+      function clearReconnectTimer() {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      }
+
+      function cleanupSocket() {
+        if (heartbeatTimer) {
+          clearTimeout(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (socket) {
+          socket.removeEventListener("open", handleSocketOpen);
+          socket.removeEventListener("message", handleSocketMessage);
+          socket.removeEventListener("error", handleSocketError);
+          socket.removeEventListener("close", handleSocketClose);
+          try {
+            socket.close();
+          } catch (err) {
+            // ignore close errors
+          }
+        }
+        socket = null;
+      }
+
+      function primeHeartbeat() {
+        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+        heartbeatTimer = setTimeout(() => {
+          sendMessage({ type: "ping" });
+        }, 15_000);
+      }
+
+      window.addEventListener("beforeunload", () => {
+        cleanupSocket();
       });
 
       // bootstrap
-      fetchPrice();
-      startPolling();
+      startWebSocket();
     </script>
   </body>
 </html>
