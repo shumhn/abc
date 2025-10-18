@@ -1,6 +1,12 @@
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use ephemeral_rollups_sdk::anchor::ephemeral;
+use ephemeral_rollups_sdk::cpi::{commit_and_undelegate_accounts, commit_accounts, delegate_account, undelegate_account};
+use ephemeral_rollups_sdk::cpi::DelegateAccounts;
+use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::consts::{DELEGATION_PROGRAM_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID};
+use ephemeral_rollups_sdk::delegate_args::DelegateAccounts as DelegateAccountAddresses;
 use pyth_sdk_solana::state::load_price_feed_from_account_info;
 
 pub const GLOBAL_STATE_SEED: &[u8] = b"global-state";
@@ -8,7 +14,15 @@ pub const ROUND_STATE_SEED: &[u8] = b"round";
 pub const ROUND_LEDGER_SEED: &[u8] = b"round-ledger";
 pub const ROUND_ESCROW_SEED: &[u8] = b"round-escrow";
 pub const VAULT_AUTHORITY_SEED: &[u8] = b"vault-authority";
+pub const MAGIC_DELEGATED_STATE_SEED: &[u8] = b"magic-delegated-state";
+pub const MAGIC_DELEGATED_LEDGER_SEED: &[u8] = b"magic-delegated-ledger";
 const PYTH_PRICE_STALENESS_THRESHOLD_SECS: i64 = 60;
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DelegateRoundConfig {
+    pub commit_frequency_ms: Option<u32>;
+    pub validator: Option<Pubkey>;
+}
 
 declare_id!("3btqev6Y8xNxqwFxFKaDPihQyVZ1gs2DpBNsDukmHxNX");
 
@@ -66,6 +80,7 @@ pub mod micro_prediction {
         round_state.final_price = None;
         round_state.winners_count = 0;
         round_state.total_winner_stake = 0;
+        round_state.delegation_status = DelegationStatus::NotDelegated;
         round_state.round_state_bump = *ctx.bumps.get("round_state").unwrap();
         round_state.reward_vault_bump = *ctx.bumps.get("round_escrow").unwrap();
 
@@ -143,6 +158,7 @@ pub mod micro_prediction {
         Ok(())
     }
 
+    pub fn close_round(ctx: Context<CloseRound>, _final_price: Option<u64>) -> Result<()> {
     pub fn close_round(ctx: Context<CloseRound>, _final_price: Option<u64>) -> Result<()> {
         let global_state = &ctx.accounts.global_state;
         require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
@@ -261,6 +277,274 @@ pub mod micro_prediction {
         for idx in updated_records {
             ledger.records[idx].claimed = true;
         }
+
+        Ok(())
+    }
+
+    pub fn delegate_round(
+        ctx: Context<DelegateRound>,
+        round_id: u64,
+        config: Option<DelegateRoundConfig>,
+    ) -> Result<()> {
+        let global_state = &ctx.accounts.global_state;
+        require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
+
+        let round_state = &mut ctx.accounts.round_state;
+        require!(round_state.round_id == round_id, ErrorCode::RoundMismatch);
+        require!(
+            round_state.status == RoundStatus::Open,
+            ErrorCode::RoundDelegationInvalidStatus
+        );
+        require!(
+            round_state.delegation_status == DelegationStatus::NotDelegated,
+            ErrorCode::DelegationAlreadyActive
+        );
+
+        require_keys_eq!(ctx.accounts.owner_program.key(), crate::id());
+        require_keys_eq!(ctx.accounts.delegation_program.key(), DELEGATION_PROGRAM_ID);
+
+        let round_addresses = DelegateAccountAddresses::new(
+            ctx.accounts.round_state.key(),
+            ctx.accounts.owner_program.key(),
+        );
+        let ledger_addresses = DelegateAccountAddresses::new(
+            ctx.accounts.prediction_ledger.key(),
+            ctx.accounts.owner_program.key(),
+        );
+
+        require_keys_eq!(
+            ctx.accounts.round_delegation_buffer.key(),
+            round_addresses.delegate_buffer
+        );
+        require_keys_eq!(
+            ctx.accounts.round_delegation_record.key(),
+            round_addresses.delegation_record
+        );
+        require_keys_eq!(
+            ctx.accounts.round_delegation_metadata.key(),
+            round_addresses.delegation_metadata
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_buffer.key(),
+            ledger_addresses.delegate_buffer
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_record.key(),
+            ledger_addresses.delegation_record
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_metadata.key(),
+            ledger_addresses.delegation_metadata
+        );
+
+        validate_delegate_accounts(
+            &ctx.accounts.round_delegation_record.to_account_info(),
+            &ctx.accounts.round_delegation_metadata.to_account_info(),
+        )?;
+        validate_delegate_accounts(
+            &ctx.accounts.ledger_delegation_record.to_account_info(),
+            &ctx.accounts.ledger_delegation_metadata.to_account_info(),
+        )?;
+
+        let delegate_config = build_delegate_config(config.clone());
+
+        let round_id_bytes = round_id.to_le_bytes();
+        let round_seeds: &[&[u8]] = &[ROUND_STATE_SEED, &round_id_bytes];
+        delegate_account(
+            DelegateAccounts {
+                payer: &ctx.accounts.authority.to_account_info(),
+                pda: &ctx.accounts.round_state.to_account_info(),
+                owner_program: &ctx.accounts.owner_program.to_account_info(),
+                buffer: &ctx.accounts.round_delegation_buffer.to_account_info(),
+                delegation_record: &ctx.accounts.round_delegation_record.to_account_info(),
+                delegation_metadata: &ctx.accounts.round_delegation_metadata.to_account_info(),
+                delegation_program: &ctx.accounts.delegation_program.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            round_seeds,
+            delegate_config,
+        )?;
+
+        let ledger_seeds: &[&[u8]] = &[ROUND_LEDGER_SEED, &round_id_bytes];
+        let ledger_delegate_config = build_delegate_config(config);
+        delegate_account(
+            DelegateAccounts {
+                payer: &ctx.accounts.authority.to_account_info(),
+                pda: &ctx.accounts.prediction_ledger.to_account_info(),
+                owner_program: &ctx.accounts.owner_program.to_account_info(),
+                buffer: &ctx.accounts.ledger_delegation_buffer.to_account_info(),
+                delegation_record: &ctx.accounts.ledger_delegation_record.to_account_info(),
+                delegation_metadata: &ctx.accounts.ledger_delegation_metadata.to_account_info(),
+                delegation_program: &ctx.accounts.delegation_program.to_account_info(),
+                system_program: &ctx.accounts.system_program.to_account_info(),
+            },
+            ledger_seeds,
+            ledger_delegate_config,
+        )?;
+
+        ctx.accounts.delegated_round_state.round_id = round_id;
+        if let Some(bump) = ctx.bumps.get("delegated_round_state") {
+            ctx.accounts.delegated_round_state.bump = *bump;
+        }
+
+        ctx.accounts.delegated_ledger_state.round_id = round_id;
+        if let Some(bump) = ctx.bumps.get("delegated_ledger_state") {
+            ctx.accounts.delegated_ledger_state.bump = *bump;
+        }
+
+        round_state.delegation_status = DelegationStatus::Delegated;
+
+        Ok(())
+    }
+
+    pub fn commit_round(ctx: Context<CommitRound>, round_id: u64) -> Result<()> {
+        let global_state = &ctx.accounts.global_state;
+        require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
+
+        let round_state = &ctx.accounts.round_state;
+        require!(round_state.round_id == round_id, ErrorCode::RoundMismatch);
+        require!(
+            round_state.delegation_status == DelegationStatus::Delegated,
+            ErrorCode::DelegationNotActive
+        );
+        require!(
+            round_state.status == RoundStatus::Settled,
+            ErrorCode::RoundDelegationInvalidStatus
+        );
+
+        require_keys_eq!(ctx.accounts.magic_context.key(), MAGIC_CONTEXT_ID);
+        require_keys_eq!(ctx.accounts.magic_program.key(), MAGIC_PROGRAM_ID);
+
+        commit_accounts(
+            &ctx.accounts.authority.to_account_info(),
+            vec![
+                &ctx.accounts.round_state.to_account_info(),
+                &ctx.accounts.prediction_ledger.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program.to_account_info(),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn commit_and_undelegate_round(
+        ctx: Context<CommitAndUndelegateRound>,
+        round_id: u64,
+    ) -> Result<()> {
+        let global_state = &ctx.accounts.global_state;
+        require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
+
+        let round_state = &mut ctx.accounts.round_state;
+        require!(round_state.round_id == round_id, ErrorCode::RoundMismatch);
+        require!(
+            round_state.delegation_status == DelegationStatus::Delegated,
+            ErrorCode::DelegationNotActive
+        );
+        require!(
+            round_state.status == RoundStatus::Settled,
+            ErrorCode::RoundDelegationInvalidStatus
+        );
+
+        require_keys_eq!(ctx.accounts.magic_context.key(), MAGIC_CONTEXT_ID);
+        require_keys_eq!(ctx.accounts.magic_program.key(), MAGIC_PROGRAM_ID);
+
+        commit_and_undelegate_accounts(
+            &ctx.accounts.authority.to_account_info(),
+            vec![
+                &ctx.accounts.round_state.to_account_info(),
+                &ctx.accounts.prediction_ledger.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program.to_account_info(),
+        )?;
+
+        round_state.delegation_status = DelegationStatus::CommitScheduled;
+
+        Ok(())
+    }
+
+    pub fn undelegate_round(ctx: Context<UndelegateRound>, round_id: u64) -> Result<()> {
+        let global_state = &ctx.accounts.global_state;
+        require_keys_eq!(ctx.accounts.authority.key(), global_state.authority);
+
+        let round_state = &mut ctx.accounts.round_state;
+        require!(round_state.round_id == round_id, ErrorCode::RoundMismatch);
+        require!(
+            matches!(
+                round_state.delegation_status,
+                DelegationStatus::Delegated | DelegationStatus::CommitScheduled
+            ),
+            ErrorCode::DelegationNotActive
+        );
+
+        require_keys_eq!(ctx.accounts.owner_program.key(), crate::id());
+        require_keys_eq!(ctx.accounts.delegation_program.key(), DELEGATION_PROGRAM_ID);
+
+        let round_addresses = DelegateAccountAddresses::new(
+            ctx.accounts.round_state.key(),
+            ctx.accounts.owner_program.key(),
+        );
+        let ledger_addresses = DelegateAccountAddresses::new(
+            ctx.accounts.prediction_ledger.key(),
+            ctx.accounts.owner_program.key(),
+        );
+
+        require_keys_eq!(
+            ctx.accounts.round_delegation_buffer.key(),
+            round_addresses.delegate_buffer
+        );
+        require_keys_eq!(
+            ctx.accounts.round_delegation_record.key(),
+            round_addresses.delegation_record
+        );
+        require_keys_eq!(
+            ctx.accounts.round_delegation_metadata.key(),
+            round_addresses.delegation_metadata
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_buffer.key(),
+            ledger_addresses.delegate_buffer
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_record.key(),
+            ledger_addresses.delegation_record
+        );
+        require_keys_eq!(
+            ctx.accounts.ledger_delegation_metadata.key(),
+            ledger_addresses.delegation_metadata
+        );
+
+        validate_delegate_accounts(
+            &ctx.accounts.round_delegation_record,
+            &ctx.accounts.round_delegation_metadata,
+        )?;
+        validate_delegate_accounts(
+            &ctx.accounts.ledger_delegation_record,
+            &ctx.accounts.ledger_delegation_metadata,
+        )?;
+
+        let round_id_bytes = round_id.to_le_bytes();
+        undelegate_account(
+            &ctx.accounts.round_state.to_account_info(),
+            ctx.accounts.owner_program.key,
+            &ctx.accounts.round_delegation_buffer,
+            &ctx.accounts.authority.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
+            vec![ROUND_STATE_SEED.to_vec(), round_id_bytes.to_vec()],
+        )?;
+
+        let ledger_round_bytes = round_id.to_le_bytes();
+        undelegate_account(
+            &ctx.accounts.prediction_ledger.to_account_info(),
+            ctx.accounts.owner_program.key,
+            &ctx.accounts.ledger_delegation_buffer,
+            &ctx.accounts.authority.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
+            vec![ROUND_LEDGER_SEED.to_vec(), ledger_round_bytes.to_vec()],
+        )?;
+
+        round_state.delegation_status = DelegationStatus::NotDelegated;
 
         Ok(())
     }
@@ -421,6 +705,162 @@ pub struct ClaimReward<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct DelegateRound<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [GLOBAL_STATE_SEED], bump = global_state.global_state_bump)]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(mut, seeds = [ROUND_STATE_SEED, &round_id.to_le_bytes()], bump = round_state.round_state_bump)]
+    pub round_state: Account<'info, RoundState>,
+    #[account(mut, seeds = [ROUND_LEDGER_SEED, &round_id.to_le_bytes()], bump = prediction_ledger.ledger_bump)]
+    pub prediction_ledger: Account<'info, PredictionLedger>,
+    #[account(
+        init,
+        payer = authority,
+        seeds = [MAGIC_DELEGATED_STATE_SEED, &round_id.to_le_bytes()],
+        bump,
+        space = DelegatedRoundState::SPACE,
+    )]
+    pub delegated_round_state: Account<'info, DelegatedRoundState>,
+    #[account(
+        init,
+        payer = authority,
+        seeds = [MAGIC_DELEGATED_LEDGER_SEED, &round_id.to_le_bytes()],
+        bump,
+        space = DelegatedLedgerState::SPACE,
+    )]
+    pub delegated_ledger_state: Account<'info, DelegatedLedgerState>,
+    /// CHECK: This is the program ID
+    pub owner_program: AccountInfo<'info>,
+    /// CHECK: Delegation program buffer PDA
+    #[account(mut)]
+    pub round_delegation_buffer: AccountInfo<'info>,
+    /// CHECK: Delegation record PDA
+    #[account(mut)]
+    pub round_delegation_record: AccountInfo<'info>,
+    /// CHECK: Delegation metadata PDA
+    #[account(mut)]
+    pub round_delegation_metadata: AccountInfo<'info>,
+    /// CHECK: Delegation program buffer PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_buffer: AccountInfo<'info>,
+    /// CHECK: Delegation record PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_record: AccountInfo<'info>,
+    /// CHECK: Delegation metadata PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_metadata: AccountInfo<'info>,
+    /// CHECK: Delegation program
+    pub delegation_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct CommitRound<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [GLOBAL_STATE_SEED], bump = global_state.global_state_bump)]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(seeds = [ROUND_STATE_SEED, &round_id.to_le_bytes()], bump = round_state.round_state_bump)]
+    pub round_state: Account<'info, RoundState>,
+    #[account(seeds = [ROUND_LEDGER_SEED, &round_id.to_le_bytes()], bump = prediction_ledger.ledger_bump)]
+    pub prediction_ledger: Account<'info, PredictionLedger>,
+    /// CHECK: Magic context PDA
+    #[account(mut)]
+    pub magic_context: AccountInfo<'info>,
+    /// CHECK: Magic program
+    pub magic_program: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct CommitAndUndelegateRound<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [GLOBAL_STATE_SEED], bump = global_state.global_state_bump)]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(mut, seeds = [ROUND_STATE_SEED, &round_id.to_le_bytes()], bump = round_state.round_state_bump)]
+    pub round_state: Account<'info, RoundState>,
+    #[account(mut, seeds = [ROUND_LEDGER_SEED, &round_id.to_le_bytes()], bump = prediction_ledger.ledger_bump)]
+    pub prediction_ledger: Account<'info, PredictionLedger>,
+    /// CHECK: Magic context PDA
+    #[account(mut)]
+    pub magic_context: AccountInfo<'info>,
+    /// CHECK: Magic program
+    pub magic_program: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct UndelegateRound<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [GLOBAL_STATE_SEED], bump = global_state.global_state_bump)]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(mut, seeds = [ROUND_STATE_SEED, &round_id.to_le_bytes()], bump = round_state.round_state_bump)]
+    pub round_state: Account<'info, RoundState>,
+    #[account(mut, seeds = [ROUND_LEDGER_SEED, &round_id.to_le_bytes()], bump = prediction_ledger.ledger_bump)]
+    pub prediction_ledger: Account<'info, PredictionLedger>,
+    #[account(
+        mut,
+        close = authority,
+        seeds = [MAGIC_DELEGATED_STATE_SEED, &round_id.to_le_bytes()],
+        bump = delegated_round_state.bump,
+    )]
+    pub delegated_round_state: Account<'info, DelegatedRoundState>,
+    #[account(
+        mut,
+        close = authority,
+        seeds = [MAGIC_DELEGATED_LEDGER_SEED, &round_id.to_le_bytes()],
+        bump = delegated_ledger_state.bump,
+    )]
+    pub delegated_ledger_state: Account<'info, DelegatedLedgerState>,
+    /// CHECK: This is the program ID
+    pub owner_program: AccountInfo<'info>,
+    /// CHECK: Delegation program buffer PDA
+    #[account(mut)]
+    pub round_delegation_buffer: AccountInfo<'info>,
+    /// CHECK: Delegation record PDA
+    #[account(mut)]
+    pub round_delegation_record: AccountInfo<'info>,
+    /// CHECK: Delegation metadata PDA
+    #[account(mut)]
+    pub round_delegation_metadata: AccountInfo<'info>,
+    /// CHECK: Delegation program buffer PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_buffer: AccountInfo<'info>,
+    /// CHECK: Delegation record PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_record: AccountInfo<'info>,
+    /// CHECK: Delegation metadata PDA for ledger
+    #[account(mut)]
+    pub ledger_delegation_metadata: AccountInfo<'info>,
+    /// CHECK: Delegation program
+    pub delegation_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+fn build_delegate_config(config: Option<DelegateRoundConfig>) -> DelegateConfig {
+    match config {
+        Some(custom) => DelegateConfig {
+            commit_frequency_ms: custom
+                .commit_frequency_ms
+                .unwrap_or_else(|| DelegateConfig::default().commit_frequency_ms),
+            validator: custom.validator,
+        },
+        None => DelegateConfig::default(),
+    }
+}
+
+fn validate_delegate_accounts(record: &AccountInfo, metadata: &AccountInfo) -> Result<()> {
+    require_keys_eq!(record.owner, &DELEGATION_PROGRAM_ID);
+    require_keys_eq!(metadata.owner, &DELEGATION_PROGRAM_ID);
+    Ok(())
+}
+
 #[account]
 pub struct GlobalState {
     pub authority: Pubkey,
@@ -455,6 +895,7 @@ pub struct RoundState {
     pub final_price: Option<u64>,
     pub winners_count: u32,
     pub total_winner_stake: u64,
+    pub delegation_status: DelegationStatus,
     pub round_state_bump: u8,
     pub reward_vault_bump: u8,
 }
@@ -469,6 +910,7 @@ impl RoundState {
         + 1 + 8                  // option final_price (anchor stores bool + value)
         + 4                      // winners_count
         + 8                      // total_winner_stake
+        + 1                      // delegation_status
         + 1                      // round_state_bump
         + 1; // reward_vault_bump
 }
@@ -477,6 +919,13 @@ impl RoundState {
 pub enum RoundStatus {
     Open,
     Settled,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
+pub enum DelegationStatus {
+    NotDelegated,
+    Delegated,
+    CommitScheduled,
 }
 
 #[account]
@@ -553,4 +1002,30 @@ pub enum ErrorCode {
     PythPriceStale,
     #[msg("Failed to scale Pyth price")]
     PythPriceScalingError,
+    #[msg("Delegate accounts already active for this round")]
+    DelegationAlreadyActive,
+    #[msg("No delegation active for this round")]
+    DelegationNotActive,
+    #[msg("Round status prevents delegation")]
+    RoundDelegationInvalidStatus,
+}
+
+#[account]
+pub struct DelegatedRoundState {
+    pub round_id: u64,
+    pub bump: u8,
+}
+
+impl DelegatedRoundState {
+    pub const SPACE: usize = 8 + 8 + 1;
+}
+
+#[account]
+pub struct DelegatedLedgerState {
+    pub round_id: u64,
+    pub bump: u8,
+}
+
+impl DelegatedLedgerState {
+    pub const SPACE: usize = 8 + 8 + 1;
 }
