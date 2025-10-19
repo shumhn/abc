@@ -4,8 +4,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const BTC_PRICE_FEED = new PublicKey("3E2hGM7WQVWyBKFYCY9ABvxP8T8SgfAisgfRxwq2EUCi");
-const HTTP_ENDPOINT = process.env.SOLANA_RPC_HTTP ?? clusterApiUrl("mainnet-beta");
+const BTC_PRICE_FEED = new PublicKey(
+  "3E2hGM7WQVWyBKFYCY9ABvxP8T8SgfAisgfRxwq2EUCi"
+);
+const HTTP_ENDPOINT =
+  process.env.SOLANA_RPC_HTTP ?? clusterApiUrl("mainnet-beta");
 const WS_ENDPOINT = process.env.SOLANA_RPC_WS;
 
 async function main() {
@@ -24,7 +27,9 @@ async function main() {
     try {
       const initialData = parsePriceData(initialInfo.data);
       console.log(
-        `Initial BTC/USD: ${initialData.price} ± ${initialData.confidence} (status: ${initialData.status ?? "unknown"})`
+        `Initial BTC/USD: ${initialData.price} ± ${
+          initialData.confidence
+        } (status: ${initialData.status ?? "unknown"})`
       );
     } catch (err) {
       console.error("Failed to decode initial price feed", err);

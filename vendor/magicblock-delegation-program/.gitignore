@@ -1,0 +1,17 @@
+*.DS_Store
+*.idea
+target
+test-ledger
+
+*.anchor
+*.bolt
+*.yarn
+tests/integration/target
+!tests/integration/target/deploy/test_delegation-keypair.json
+tests/integration/node_modules
+tests/integration/test-ledger
+**/*.rs.bk
+
+sdk/ts/lib
+sdk/ts/node_modules
+

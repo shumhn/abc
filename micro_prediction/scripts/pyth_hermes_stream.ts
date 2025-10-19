@@ -47,7 +47,9 @@ async function fetchLatestPrice() {
     const timestamp = new Date(publish_time * 1000).toISOString();
 
     console.log(
-      `BTC/USD: ${scaledPrice.toFixed(2)} ±${scaledConf.toFixed(2)} at ${timestamp}`
+      `BTC/USD: ${scaledPrice.toFixed(2)} ±${scaledConf.toFixed(
+        2
+      )} at ${timestamp}`
     );
   } catch (err) {
     console.error("Failed to fetch price from Hermes", err);

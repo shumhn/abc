@@ -28,8 +28,7 @@ import { expect } from "chai";
 describe("MicroPrediction", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
-  const program = anchor.workspace
-    .MicroPrediction as Program<MicroPrediction>;
+  const program = anchor.workspace.MicroPrediction as Program<MicroPrediction>;
   const provider = anchor.getProvider();
 
   type Event = anchor.IdlEvents<(typeof program)["idl"]>;

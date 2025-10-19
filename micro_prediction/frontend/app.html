@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prediction Market - Arcium Encrypted</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    
+    .badge.mock { background: #fef3c7; color: #92400e; }
+    .badge.live { background: #d1fae5; color: #065f46; }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: 500;
+    }
+    
+    input, select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+    
+    input:focus, select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 10px;
+      font-size: 14px;
+      display: none;
+    }
+    
+    .status.success {
+      background: #d1fae5;
+      color: #065f46;
+      display: block;
+    }
+    
+    .status.error {
+      background: #fee2e2;
+      color: #991b1b;
+      display: block;
+    }
+    
+    .status.info {
+      background: #dbeafe;
+      color: #1e40af;
+      display: block;
+    }
+    
+    .encryption-info {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f3f4f6;
+      border-radius: 10px;
+      font-size: 12px;
+      color: #666;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .encryption-info pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 Encrypted Prediction Market</h1>
+    <div class="subtitle">
+      <span id="arciumMode" class="badge mock">Loading...</span>
+      <span id="mxeName" style="font-size: 12px; color: #999;"></span>
+    </div>
+    
+    <form id="predictionForm">
+      <div class="form-group">
+        <label for="roundId">Round ID</label>
+        <input type="number" id="roundId" value="0" min="0" required>
+      </div>
+      
+      <div class="form-group">
+        <label for="windowIndex">Price Prediction Window</label>
+        <select id="windowIndex" required>
+          <option value="0">📉 Way Down (-5% to -2%)</option>
+          <option value="1">📉 Down (-2% to -0.5%)</option>
+          <option value="2" selected>➡️ Stable (-0.5% to +0.5%)</option>
+          <option value="3">📈 Up (+0.5% to +2%)</option>
+          <option value="4">📈 Way Up (+2% to +5%)</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="amount">Stake Amount (SOL)</label>
+        <input type="number" id="amount" value="0.1" min="0.01" step="0.01" required>
+      </div>
+      
+      <div class="form-group">
+        <label for="wallet">Your Wallet Address</label>
+        <input type="text" id="wallet" placeholder="Your Solana wallet address" required>
+      </div>
+      
+      <button type="submit" id="submitBtn">
+        🔐 Encrypt &amp; Submit Prediction
+      </button>
+    </form>
+    
+    <div id="status" class="status"></div>
+    <div id="encryptionInfo" class="encryption-info" style="display: none;"></div>
+  </div>
+
+  <script src="arcium-encrypt.js"></script>
+  <script>
+    const arcium = new ArciumEncryption();
+    const form = document.getElementById('predictionForm');
+    const statusEl = document.getElementById('status');
+    const encryptionInfoEl = document.getElementById('encryptionInfo');
+    const submitBtn = document.getElementById('submitBtn');
+    const modeEl = document.getElementById('arciumMode');
+    const mxeNameEl = document.getElementById('mxeName');
+
+    // Initialize Arcium on page load
+    async function init() {
+      try {
+        const config = await arcium.initialize();
+        
+        // Update UI with mode
+        modeEl.textContent = config.mode.toUpperCase();
+        modeEl.className = `badge ${config.mode === 'devnet' ? 'live' : 'mock'}`;
+        mxeNameEl.textContent = config.name;
+        
+        console.log('✅ Arcium initialized:', config);
+      } catch (error) {
+        console.error('Failed to initialize:', error);
+        showStatus('Failed to initialize Arcium', 'error');
+      }
+    }
+
+    // Handle form submission
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const roundId = parseInt(document.getElementById('roundId').value);
+      const windowIndex = parseInt(document.getElementById('windowIndex').value);
+      const amount = parseFloat(document.getElementById('amount').value);
+      const wallet = document.getElementById('wallet').value.trim();
+      
+      if (!wallet) {
+        showStatus('Please enter your wallet address', 'error');
+        return;
+      }
+      
+      try {
+        submitBtn.disabled = true;
+        showStatus('🔐 Encrypting prediction...', 'info');
+        
+        // Encrypt prediction using Arcium
+        const encrypted = await arcium.encryptPrediction({
+          windowIndex,
+          amount: Math.floor(amount * 1e9), // Convert to lamports
+          wallet
+        });
+        
+        // Show encryption details
+        encryptionInfoEl.style.display = 'block';
+        encryptionInfoEl.innerHTML = `
+          <strong>Encryption Details:</strong><br>
+          Mode: ${encrypted.metadata.mode}<br>
+          MXE ID: ${encrypted.metadata.mxeId}<br>
+          Commitment: ${encrypted.commitment.slice(0, 8).join(', ')}...<br>
+          Ciphertext Size: ${encrypted.ciphertext.length} bytes<br>
+          <pre style="margin-top: 8px; font-size: 10px; color: #999;">
+Nonce: ${encrypted.nonce.substring(0, 40)}...
+Ephemeral Key: ${encrypted.ephemeralPublicKey.substring(0, 40)}...
+          </pre>
+        `;
+        
+        showStatus('📤 Submitting to backend...', 'info');
+        
+        // Submit encrypted prediction to backend
+        const response = await fetch(`http://localhost:3001/predictions/${roundId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commitment: encrypted.commitment,
+            ciphertext: encrypted.ciphertext,
+            nonce: encrypted.nonce,
+            ephemeralPublicKey: encrypted.ephemeralPublicKey,
+            wallet,
+            stake: Math.floor(amount * 1e9),
+            windowIndex,
+            transactionSignature: 'pending', // Would be actual tx sig in production
+            receivedAt: new Date().toISOString()
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Backend error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        showStatus(`✅ Prediction submitted successfully! ${arcium.isRealMode() ? 'Encrypted with real Arcium' : 'Using mock encryption'}`, 'success');
+        
+        console.log('Submission result:', result);
+        
+      } catch (error) {
+        console.error('Submission error:', error);
+        showStatus(`❌ Error: ${error.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    function showStatus(message, type) {
+      statusEl.textContent = message;
+      statusEl.className = `status ${type}`;
+    }
+
+    // Initialize on page load
+    init();
+  </script>
+</body>
+</html>
