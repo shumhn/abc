@@ -1,0 +1,116 @@
+{
+  "version": "0.1.0",
+  "name": "micro_prediction",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        { "name": "authority", "isMut": true, "isSigner": true },
+        { "name": "tokenMint", "isMut": false, "isSigner": false },
+        { "name": "feeTreasury", "isMut": true, "isSigner": false },
+        { "name": "config", "isMut": true, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "settlementAuthority", "type": "publicKey" },
+        { "name": "feeBps", "type": "u16" }
+      ]
+    },
+    {
+      "name": "initializeRound",
+      "accounts": [
+        { "name": "authority", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": false, "isSigner": false },
+        { "name": "round", "isMut": true, "isSigner": false },
+        { "name": "escrowVault", "isMut": true, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "rent", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "roundId", "type": "u64" },
+        { "name": "startTs", "type": "i64" },
+        { "name": "endTs", "type": "i64" },
+        { "name": "pythPriceAccount", "type": "publicKey" }
+      ]
+    },
+    {
+      "name": "submitPrediction",
+      "accounts": [
+        { "name": "user", "isMut": true, "isSigner": true },
+        { "name": "config", "isMut": false, "isSigner": false },
+        { "name": "round", "isMut": true, "isSigner": false },
+        { "name": "prediction", "isMut": true, "isSigner": false },
+        { "name": "userTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "escrowVault", "isMut": true, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "commitment", "type": { "array": ["u8", 32] } },
+        { "name": "windowIndex", "type": "u8" },
+        { "name": "stake", "type": "u64" },
+        { "name": "predictionIndex", "type": "u16" }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "authority", "type": "publicKey" },
+          { "name": "settlementAuthority", "type": "publicKey" },
+          { "name": "tokenMint", "type": "publicKey" },
+          { "name": "feeTreasury", "type": "publicKey" },
+          { "name": "feeBps", "type": "u16" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "Round",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "roundId", "type": "u64" },
+          { "name": "startTs", "type": "i64" },
+          { "name": "endTs", "type": "i64" },
+          { "name": "status", "type": "u8" },
+          { "name": "tokenMint", "type": "publicKey" },
+          { "name": "escrowVault", "type": "publicKey" },
+          { "name": "totalStake", "type": "u64" },
+          { "name": "totalPaid", "type": "u64" },
+          { "name": "finalPrice", "type": { "option": "i64" } },
+          { "name": "settlementTimestamp", "type": { "option": "i64" } },
+          { "name": "pythPriceAccount", "type": "publicKey" },
+          { "name": "arciumCompId", "type": { "option": "publicKey" } },
+          { "name": "resultCommitment", "type": { "option": { "array": ["u8", 32] } } },
+          { "name": "bump", "type": "u8" },
+          { "name": "escrowBump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "Prediction",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "round", "type": "publicKey" },
+          { "name": "owner", "type": "publicKey" },
+          { "name": "tokenMint", "type": "publicKey" },
+          { "name": "commitment", "type": { "array": ["u8", 32] } },
+          { "name": "stake", "type": "u64" },
+          { "name": "windowIndex", "type": "u8" },
+          { "name": "status", "type": "u8" },
+          { "name": "predictionIndex", "type": "u16" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "address": "3btqev6Y8xNxqwFxFKaDPihQyVZ1gs2DpBNsDukmHxNX"
+  }
+}

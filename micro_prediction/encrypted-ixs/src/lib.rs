@@ -4,161 +4,95 @@ use arcis_imports::*;
 mod circuits {
     use arcis_imports::*;
 
-    // Original add_together circuit for testing
-    pub struct InputValues {
-        v1: u8,
-        v2: u8,
+    #[derive(Clone, Copy, MxeSerializable)]
+    pub struct EncryptedPrediction {
+        pub commitment: [u8; 32],
+        pub predicted_price: EncScalar<Shared>,
+        pub stake: EncScalar<Shared>,
+    }
+
+    #[derive(Clone, MxeSerializable)]
+    pub struct SettlementEntry {
+        pub commitment: [u8; 32],
+        pub payout: u64,
+    }
+
+    #[derive(Clone, MxeSerializable)]
+    pub struct SettlementResult {
+        pub round_id: u64,
+        pub final_price: i64,
+        pub fee_total: u64,
+        pub settlements: Vec<SettlementEntry>,
     }
 
     #[instruction]
-    pub fn add_together(input_ctxt: Enc<Shared, InputValues>) -> Enc<Shared, u16> {
-        let input = input_ctxt.to_arcis();
-        let sum = input.v1 as u16 + input.v2 as u16;
-        input_ctxt.owner.from_arcis(sum)
+    pub fn determine_winners(
+        predictions: Enc<Vec<EncryptedPrediction>, Shared>,
+        final_price: EncScalar<Shared>,
+        fee_bps: u16,
+        round_id: u64,
+    ) -> Enc<SettlementResult, Shared> {
+        let predictions = predictions.to_arcis();
+        let final_price_val = final_price.to_arcis();
+
+        let mut min_diff: Option<u128> = None;
+        for prediction in predictions.iter() {
+            let price = prediction.predicted_price.to_arcis();
+            let diff = distance(price, final_price_val);
+            min_diff = Some(match min_diff {
+                Some(current_min) if diff < current_min => diff,
+                Some(current_min) => current_min,
+                None => diff,
+            });
+        }
+
+        let min_diff = min_diff.unwrap_or_default();
+
+        let mut total_stake: u128 = 0;
+        let mut winners: Vec<&EncryptedPrediction> = Vec::new();
+        for prediction in predictions.iter() {
+            let price = prediction.predicted_price.to_arcis();
+            let diff = distance(price, final_price_val);
+            let stake = prediction.stake.to_arcis();
+            total_stake = total_stake.saturating_add(stake);
+            if diff == min_diff {
+                winners.push(prediction);
+            }
+        }
+
+        let mut payouts: Vec<SettlementEntry> = Vec::new();
+        let mut fee_total: u128 = 0;
+
+        if !winners.is_empty() {
+            for winner in winners.iter() {
+                let stake = winner.stake.to_arcis();
+                let gross = stake;
+                let fee = gross * fee_bps as u128 / 10_000u128;
+                let payout = gross.saturating_sub(fee);
+                fee_total = fee_total.saturating_add(fee);
+                payouts.push(SettlementEntry {
+                    commitment: winner.commitment,
+                    payout: payout as u64,
+                });
+            }
+        }
+
+        Enc::from_arcis(
+            SettlementResult {
+                round_id,
+                final_price: final_price_val as i64,
+                fee_total: fee_total as u64,
+                settlements: payouts,
+            },
+            predictions.owner,
+        )
     }
 
-    // Prediction market circuits
-    pub struct PredictionInput {
-        user_prediction: u64,
-        actual_price: u64,
-        threshold_percent: u8, // e.g., 5 for 5% threshold
-    }
-
-    pub struct PredictionOutput {
-        is_winner: bool,
-        absolute_diff: u64,
-    }
-
-    /// Check if a prediction is within threshold of actual price
-    #[instruction]
-    pub fn check_prediction_winner(
-        input_ctxt: Enc<Shared, PredictionInput>
-    ) -> Enc<Shared, PredictionOutput> {
-        let input = input_ctxt.to_arcis();
-        
-        // Calculate absolute difference
-        let diff = if input.user_prediction > input.actual_price {
-            input.user_prediction - input.actual_price
+    fn distance(a: u128, b: u128) -> u128 {
+        if a >= b {
+            a - b
         } else {
-            input.actual_price - input.user_prediction
-        };
-        
-        // Calculate threshold (e.g., 5% of actual price)
-        let threshold = (input.actual_price * input.threshold_percent as u64) / 100;
-        
-        // Determine if winner
-        let is_winner = diff <= threshold;
-        
-        let output = PredictionOutput {
-            is_winner,
-            absolute_diff: diff,
-        };
-        
-        input_ctxt.owner.from_arcis(output)
-    }
-
-    pub struct BatchPredictionsInput {
-        predictions: [u64; 10], // Support up to 10 predictions
-        actual_price: u64,
-        num_predictions: u8,
-    }
-
-    pub struct BatchPredictionsOutput {
-        winner_indices: [u8; 10],
-        differences: [u64; 10],
-        num_winners: u8,
-    }
-
-    /// Batch process multiple predictions and find winners
-    #[instruction]
-    pub fn batch_check_winners(
-        input_ctxt: Enc<Shared, BatchPredictionsInput>
-    ) -> Enc<Shared, BatchPredictionsOutput> {
-        let input = input_ctxt.to_arcis();
-        
-        let mut winner_indices = [0u8; 10];
-        let mut differences = [0u64; 10];
-        let mut num_winners = 0u8;
-        let mut min_diff = u64::MAX;
-        
-        // First pass: find minimum difference
-        for i in 0..(input.num_predictions as usize) {
-            let prediction = input.predictions[i];
-            let diff = if prediction > input.actual_price {
-                prediction - input.actual_price
-            } else {
-                input.actual_price - prediction
-            };
-            differences[i] = diff;
-            
-            if diff < min_diff {
-                min_diff = diff;
-            }
+            b - a
         }
-        
-        // Second pass: mark winners (those with minimum difference)
-        for i in 0..(input.num_predictions as usize) {
-            if differences[i] == min_diff {
-                winner_indices[num_winners as usize] = i as u8;
-                num_winners += 1;
-            }
-        }
-        
-        let output = BatchPredictionsOutput {
-            winner_indices,
-            differences,
-            num_winners,
-        };
-        
-        input_ctxt.owner.from_arcis(output)
-    }
-
-    pub struct PrivatePriceInput {
-        encrypted_price_1: u64,
-        encrypted_price_2: u64,
-        encrypted_price_3: u64,
-        actual_price: u64,
-    }
-
-    pub struct PrivatePriceOutput {
-        closest_index: u8, // 1, 2, or 3
-        min_difference: u64,
-    }
-
-    /// Compare 3 private predictions and find closest to actual price
-    #[instruction]
-    pub fn find_closest_prediction(
-        input_ctxt: Enc<Shared, PrivatePriceInput>
-    ) -> Enc<Shared, PrivatePriceOutput> {
-        let input = input_ctxt.to_arcis();
-        
-        let prices = [
-            input.encrypted_price_1,
-            input.encrypted_price_2,
-            input.encrypted_price_3,
-        ];
-        
-        let mut min_diff = u64::MAX;
-        let mut closest_idx = 0u8;
-        
-        for (idx, &price) in prices.iter().enumerate() {
-            let diff = if price > input.actual_price {
-                price - input.actual_price
-            } else {
-                input.actual_price - price
-            };
-            
-            if diff < min_diff {
-                min_diff = diff;
-                closest_idx = (idx + 1) as u8;
-            }
-        }
-        
-        let output = PrivatePriceOutput {
-            closest_index: closest_idx,
-            min_difference: min_diff,
-        };
-        
-        input_ctxt.owner.from_arcis(output)
     }
 }

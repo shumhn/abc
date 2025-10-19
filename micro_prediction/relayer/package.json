@@ -1,0 +1,22 @@
+{
+  "name": "prediction-market-relayer",
+  "version": "1.0.0",
+  "description": "Relayer for managing prediction market rounds",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@arcium-hq/client": "^0.3.0",
+    "@arcium-hq/reader": "^0.3.0",
+    "@coral-xyz/anchor": "0.32.1",
+    "@pythnetwork/client": "^2.22.1",
+    "@solana/web3.js": "^1.98.4",
+    "dotenv": "^17.2.3",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

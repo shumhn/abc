@@ -12,9 +12,15 @@ import {
 import { expect } from "chai";
 
 // MagicBlock constants (replace with actual values)
-const DELEGATION_PROGRAM_ID = new PublicKey("DeLeg1111111111111111111111111111111111111");
-const MAGIC_PROGRAM_ID = new PublicKey("Magic1111111111111111111111111111111111111");
-const MAGIC_CONTEXT_ID = new PublicKey("MCtxt1111111111111111111111111111111111111");
+const DELEGATION_PROGRAM_ID = new PublicKey(
+  "DeLeg1111111111111111111111111111111111111"
+);
+const MAGIC_PROGRAM_ID = new PublicKey(
+  "Magic1111111111111111111111111111111111111"
+);
+const MAGIC_CONTEXT_ID = new PublicKey(
+  "MCtxt1111111111111111111111111111111111111"
+);
 
 describe("MicroPrediction Delegation Flow", () => {
   const provider = anchor.AnchorProvider.env();
@@ -110,25 +116,37 @@ describe("MicroPrediction Delegation Flow", () => {
 
     before(async () => {
       [roundState] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [predictionLedger] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round-ledger"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round-ledger"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [roundEscrow] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round-escrow"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round-escrow"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       player1 = Keypair.generate();
-      
+
       // Airdrop SOL to player
       await provider.connection.confirmTransaction(
-        await provider.connection.requestAirdrop(player1.publicKey, 2_000_000_000)
+        await provider.connection.requestAirdrop(
+          player1.publicKey,
+          2_000_000_000
+        )
       );
 
       // Create token account for player
@@ -176,11 +194,7 @@ describe("MicroPrediction Delegation Flow", () => {
       const stakeAmount = new anchor.BN(10_000_000); // 10 tokens
 
       await program.methods
-        .placePrediction(
-          new anchor.BN(roundId),
-          predictedPrice,
-          stakeAmount
-        )
+        .placePrediction(new anchor.BN(roundId), predictedPrice, stakeAmount)
         .accounts({
           player: player1.publicKey,
           globalState,
@@ -194,11 +208,19 @@ describe("MicroPrediction Delegation Flow", () => {
         .signers([player1])
         .rpc();
 
-      const ledger = await program.account.predictionLedger.fetch(predictionLedger);
+      const ledger = await program.account.predictionLedger.fetch(
+        predictionLedger
+      );
       expect(ledger.records.length).to.equal(1);
-      expect(ledger.records[0].user.toString()).to.equal(player1.publicKey.toString());
-      expect(ledger.records[0].predictedPrice.toNumber()).to.equal(predictedPrice.toNumber());
-      expect(ledger.records[0].stake.toNumber()).to.equal(stakeAmount.toNumber());
+      expect(ledger.records[0].user.toString()).to.equal(
+        player1.publicKey.toString()
+      );
+      expect(ledger.records[0].predictedPrice.toNumber()).to.equal(
+        predictedPrice.toNumber()
+      );
+      expect(ledger.records[0].stake.toNumber()).to.equal(
+        stakeAmount.toNumber()
+      );
     });
   });
 
@@ -212,27 +234,42 @@ describe("MicroPrediction Delegation Flow", () => {
 
     before(async () => {
       [roundState] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [predictionLedger] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round-ledger"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round-ledger"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [roundEscrow] = PublicKey.findProgramAddressSync(
-        [Buffer.from("round-escrow"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("round-escrow"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [delegatedRoundState] = PublicKey.findProgramAddressSync(
-        [Buffer.from("magic-delegated-state"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("magic-delegated-state"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
       [delegatedLedgerState] = PublicKey.findProgramAddressSync(
-        [Buffer.from("magic-delegated-ledger"), Buffer.from(new anchor.BN(roundId).toArray("le", 8))],
+        [
+          Buffer.from("magic-delegated-ledger"),
+          Buffer.from(new anchor.BN(roundId).toArray("le", 8)),
+        ],
         program.programId
       );
 
@@ -317,4 +354,3 @@ describe("MicroPrediction Delegation Flow", () => {
     });
   });
 });
-
